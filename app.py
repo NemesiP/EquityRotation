@@ -243,7 +243,10 @@ def _render_view_controls(assets: tuple[str, ...]) -> tuple[str | None, int, str
             options=["Auto fit", "Fixed period"],
             key="axis_mode",
             horizontal=True,
-            help="Auto fit follows the active trails; Fixed period keeps playback comparisons stable.",
+            help=(
+                "Auto fit scales each centered axis to the active trails; "
+                "Fixed period keeps playback comparisons stable."
+            ),
         )
     focus = None if st.session_state.focus_ticker == "All assets" else st.session_state.focus_ticker
     return focus, int(st.session_state.tail_length), str(st.session_state.axis_mode)

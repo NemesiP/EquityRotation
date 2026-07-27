@@ -62,14 +62,28 @@ def select_rotation_tails(
     return selected
 
 
-def _axis_extent(tails: Mapping[str, pd.DataFrame]) -> float:
-    deviations: list[float] = []
+def _padded_extent(max_deviation: float) -> float:
+    """Return a tight, rounded, centered extent for one axis."""
+
+    if not np.isfinite(max_deviation) or max_deviation <= 0:
+        return 0.25
+    padded = max_deviation * 1.1
+    magnitude = 10 ** math.floor(math.log10(padded))
+    rounding_step = magnitude / 4
+    rounded = math.ceil(padded / rounding_step) * rounding_step
+    return max(0.25, rounded)
+
+
+def _axis_extents(tails: Mapping[str, pd.DataFrame]) -> tuple[float, float]:
+    ratio_deviations: list[float] = []
+    momentum_deviations: list[float] = []
     for frame in tails.values():
-        deviations.extend(np.abs(frame["rs_ratio"] - 100).tolist())
-        deviations.extend(np.abs(frame["rs_momentum"] - 100).tolist())
-    max_deviation = max(deviations, default=0)
-    padded = max_deviation * 1.32
-    return max(1.5, math.ceil(padded * 4) / 4)
+        ratio_deviations.extend(np.abs(frame["rs_ratio"] - 100).tolist())
+        momentum_deviations.extend(np.abs(frame["rs_momentum"] - 100).tolist())
+    return (
+        _padded_extent(max(ratio_deviations, default=0)),
+        _padded_extent(max(momentum_deviations, default=0)),
+    )
 
 
 def period_axis_extent(
@@ -85,84 +99,23 @@ def period_axis_extent(
         ticker: group
         for ticker, group in visible.groupby("ticker", sort=True)
     }
-    return _axis_extent(frames)
+    ratio_extent, momentum_extent = _axis_extents(frames)
+    return max(ratio_extent, momentum_extent)
 
 
-def _spread_label_group(
-    points: list[tuple[str, float, float]],
-    low: float,
-    high: float,
-    extent: float,
-    direction: int,
-) -> dict[str, tuple[float, float, str]]:
-    if not points:
-        return {}
+def _pointer_label(ticker: str) -> str:
+    """Keep endpoint text compact, including for Bloomberg identifiers."""
 
-    lower = low + extent * 0.12
-    upper = high - extent * 0.12
-    gap = min(extent * 0.09, (upper - lower) / max(len(points) - 1, 1))
-    ordered = sorted(points, key=lambda point: (point[2], point[0]))
-    positions: list[float] = []
-
-    for _, _, desired_y in ordered:
-        candidate = min(max(desired_y, lower), upper)
-        if positions:
-            candidate = max(candidate, positions[-1] + gap)
-        positions.append(candidate)
-
-    if positions[-1] > upper:
-        shift = positions[-1] - upper
-        positions = [position - shift for position in positions]
-    for index in range(len(positions) - 2, -1, -1):
-        positions[index] = min(positions[index], positions[index + 1] - gap)
-    if positions[0] < lower:
-        shift = lower - positions[0]
-        positions = [position + shift for position in positions]
-
-    labels: dict[str, tuple[float, float, str]] = {}
-    for (ticker, point_x, _), label_y in zip(ordered, positions):
-        label_x = point_x + direction * extent * 0.045
-        label_x = min(max(label_x, low + extent * 0.08), high - extent * 0.08)
-        labels[ticker] = (
-            label_x,
-            label_y,
-            "left" if direction > 0 else "right",
-        )
-    return labels
+    short_ticker = ticker.split(" ", 1)[0]
+    return short_ticker if len(short_ticker) <= 6 else f"{short_ticker[:5]}…"
 
 
-def _endpoint_label_layout(
-    tails: Mapping[str, pd.DataFrame],
-    low: float,
-    high: float,
-    extent: float,
-    focus_ticker: str | None,
-) -> dict[str, tuple[float, float, str]]:
-    if focus_ticker:
-        if focus_ticker not in tails:
-            return {}
-        latest = tails[focus_ticker].iloc[-1]
-        x = float(latest["rs_ratio"])
-        y = float(latest["rs_momentum"])
-        direction = 1 if x >= 100 else -1
-        return _spread_label_group(
-            [(focus_ticker, x, y)],
-            low,
-            high,
-            extent,
-            direction,
-        )
+def _rgba(hex_color: str, opacity: float) -> str:
+    """Convert a palette color to an explicit Plotly RGBA value."""
 
-    left: list[tuple[str, float, float]] = []
-    right: list[tuple[str, float, float]] = []
-    for ticker, trail in tails.items():
-        latest = trail.iloc[-1]
-        point = (ticker, float(latest["rs_ratio"]), float(latest["rs_momentum"]))
-        (right if point[1] >= 100 else left).append(point)
-
-    labels = _spread_label_group(left, low, high, extent, -1)
-    labels.update(_spread_label_group(right, low, high, extent, 1))
-    return labels
+    value = hex_color.lstrip("#")
+    red, green, blue = (int(value[index : index + 2], 16) for index in (0, 2, 4))
+    return f"rgba({red},{green},{blue},{opacity:.2f})"
 
 
 def build_rrg_figure(
@@ -178,16 +131,19 @@ def build_rrg_figure(
     """Build the quadrant chart and return the displayed asset tails."""
 
     tails = select_rotation_tails(rotation, visible_start, tail_length, as_of)
-    extent = fixed_extent if fixed_extent is not None else _axis_extent(tails)
-    low, high = 100 - extent, 100 + extent
-    labels = _endpoint_label_layout(tails, low, high, extent, focus_ticker)
+    if fixed_extent is None:
+        ratio_extent, momentum_extent = _axis_extents(tails)
+    else:
+        ratio_extent = momentum_extent = fixed_extent
+    x_low, x_high = 100 - ratio_extent, 100 + ratio_extent
+    y_low, y_high = 100 - momentum_extent, 100 + momentum_extent
 
     figure = go.Figure()
     regions = (
-        ("Improving", low, 100, 100, high),
-        ("Leading", 100, high, 100, high),
-        ("Weakening", 100, high, low, 100),
-        ("Lagging", low, 100, low, 100),
+        ("Improving", x_low, 100, 100, y_high),
+        ("Leading", 100, x_high, 100, y_high),
+        ("Weakening", 100, x_high, y_low, 100),
+        ("Lagging", x_low, 100, y_low, 100),
     )
     for name, x0, x1, y0, y1 in regions:
         figure.add_shape(
@@ -226,12 +182,11 @@ def build_rrg_figure(
         color = ASSET_COLORS[index % len(ASSET_COLORS)]
         focus_active = focus_ticker is not None
         is_focused = not focus_active or ticker == focus_ticker
-        marker_sizes = np.linspace(4, 9, len(trail)).tolist()
-        marker_sizes[-1] = 13
-        marker_opacity = np.linspace(0.22, 0.9, len(trail)).tolist()
-        marker_opacity[-1] = 1
+        marker_sizes = np.linspace(4, 8, len(trail)).tolist()
+        marker_sizes[-1] = 0
+        marker_opacity = np.linspace(0.08, 0.55, len(trail)).tolist()
+        marker_opacity[-1] = 0
         marker_lines = [0] * len(trail)
-        marker_lines[-1] = 2
         hover_data = np.column_stack(
             [
                 trail["date"].dt.strftime("%d %b %Y"),
@@ -249,7 +204,7 @@ def build_rrg_figure(
                 legendgroup=ticker,
                 opacity=1 if is_focused else 0.13,
                 line={
-                    "color": color,
+                    "color": _rgba(color, 0.58 if ticker == focus_ticker else 0.38),
                     "width": 3 if ticker == focus_ticker else 2.25,
                     "shape": "linear",
                 },
@@ -293,29 +248,17 @@ def build_rrg_figure(
                 opacity=1 if is_focused else 0.12,
             )
 
-        if ticker in labels:
-            label_x, label_y, anchor = labels[ticker]
+        if is_focused:
             figure.add_annotation(
                 x=latest["rs_ratio"],
                 y=latest["rs_momentum"],
-                ax=label_x,
-                ay=label_y,
-                xref="x",
-                yref="y",
-                axref="x",
-                ayref="y",
-                text=f"<b>{ticker}</b>",
-                showarrow=True,
-                arrowhead=0,
-                arrowsize=0.7,
-                arrowwidth=0.8,
-                arrowcolor=color,
-                xanchor=anchor,
-                font={"family": FONT_FAMILY, "size": 13, "color": color},
-                bgcolor="rgba(255,255,255,0.92)",
-                bordercolor="rgba(213,220,231,0.9)",
-                borderwidth=0.6,
-                borderpad=3,
+                text=_pointer_label(ticker),
+                showarrow=False,
+                xanchor="center",
+                yanchor="bottom",
+                yshift=13,
+                font={"family": FONT_FAMILY, "size": 10, "color": color},
+                opacity=1,
             )
 
     figure.add_trace(
@@ -340,12 +283,12 @@ def build_rrg_figure(
     figure.add_annotation(
         x=100,
         y=100,
-        text=f"<b>{benchmark}</b>",
+        text=_pointer_label(benchmark),
         showarrow=False,
-        xshift=14,
-        yshift=-16,
-        xanchor="left",
-        font={"family": FONT_FAMILY, "size": 12, "color": "#172033"},
+        xanchor="center",
+        yanchor="bottom",
+        yshift=12,
+        font={"family": FONT_FAMILY, "size": 10, "color": "#172033"},
     )
 
     figure.add_hline(y=100, line_width=1.2, line_color="#68758A")
@@ -380,7 +323,7 @@ def build_rrg_figure(
     )
     figure.update_xaxes(
         title="Normalized RS-Ratio (proxy)",
-        range=[low, high],
+        range=[x_low, x_high],
         fixedrange=False,
         showgrid=True,
         gridcolor="#DDE3EC",
@@ -392,7 +335,7 @@ def build_rrg_figure(
     )
     figure.update_yaxes(
         title="Normalized RS-Momentum (proxy)",
-        range=[low, high],
+        range=[y_low, y_high],
         fixedrange=False,
         showgrid=True,
         gridcolor="#DDE3EC",
@@ -401,8 +344,8 @@ def build_rrg_figure(
         linecolor="#AAB4C3",
         linewidth=1,
         mirror=True,
-        scaleanchor="x",
-        scaleratio=1,
+        scaleanchor="x" if fixed_extent is not None else None,
+        scaleratio=1 if fixed_extent is not None else None,
     )
     return figure, tails
 

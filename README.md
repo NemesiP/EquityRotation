@@ -84,8 +84,10 @@ both xbbg-style wide MultiIndex responses and pdblp-style long responses.
 - Presets cover US sectors, US factors, global regions, and cross-asset rotation.
 - Focus mode dims other trails and compares the selected asset with its benchmark.
 - The playback scrubber keeps the rotation map and inspector on the same date.
-- Fixed-period axes make dates comparable; Auto fit follows active trails with
-  centered, label-aware padding.
+- Fixed-period axes make dates comparable; Auto fit scales each 100-centered axis
+  independently so active trails use the available plot area.
+- Compact, regular-weight ticker labels sit directly above each trail's direction
+  arrow without adding endpoint bubbles.
 - The latest summary and sortable snapshot remain pinned to the newest observation.
 - Snapshot and visible-history CSV exports are available below the table.
 

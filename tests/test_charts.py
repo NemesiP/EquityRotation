@@ -45,7 +45,7 @@ def test_tail_selection_respects_visible_start_and_length():
     assert all(frame["date"].max() <= pd.Timestamp("2024-02-02") for frame in earlier.values())
 
 
-def test_rrg_figure_has_quadrants_center_and_symmetric_axes():
+def test_rrg_figure_has_quadrants_center_and_centered_axes():
     figure, tails = build_rrg_figure(
         sample_rotation(),
         "SPY",
@@ -56,8 +56,8 @@ def test_rrg_figure_has_quadrants_center_and_symmetric_axes():
     assert len(figure.layout.shapes) == 6  # four regions plus the 100/100 crosshair
     assert any(trace.name == "SPY · benchmark" for trace in figure.data)
     assert set(tails) == {"XLF", "XLK"}
-    assert figure.layout.xaxis.range == figure.layout.yaxis.range
     assert sum(figure.layout.xaxis.range) == 200
+    assert sum(figure.layout.yaxis.range) == 200
 
 
 def test_benchmark_figure_marks_visible_tail():
@@ -92,14 +92,27 @@ def test_focused_rrg_uses_faded_markers_linear_paths_and_fixed_extent():
     xlk = next(trace for trace in figure.data if trace.name == "XLK")
     xlf = next(trace for trace in figure.data if trace.name == "XLF")
     assert xlk.line.shape == "linear"
+    assert xlk.line.color.endswith(",0.58)")
+    assert xlf.line.color.endswith(",0.38)")
     assert xlk.opacity == 1
     assert xlf.opacity == 0.13
-    assert list(xlk.marker.opacity) == sorted(xlk.marker.opacity)
-    assert xlk.marker.size[-1] == 13
+    assert xlk.marker.opacity[0] == 0.08
+    assert xlk.marker.opacity[-2] < 0.55
+    assert list(xlk.marker.opacity[:-1]) == sorted(xlk.marker.opacity[:-1])
+    assert xlk.marker.opacity[-1] == 0
+    assert xlk.marker.size[-1] == 0
+    assert xlk.mode == "lines+markers"
     assert figure.layout.xaxis.range == (100 - extent, 100 + extent)
-    annotation_text = {annotation.text for annotation in figure.layout.annotations}
-    assert "<b>XLK</b>" in annotation_text
-    assert "<b>XLF</b>" not in annotation_text
+    assert figure.layout.yaxis.range == (100 - extent, 100 + extent)
+    endpoint_labels = {
+        annotation.text: annotation
+        for annotation in figure.layout.annotations
+        if annotation.text in {"XLK", "XLF"}
+    }
+    assert set(endpoint_labels) == {"XLK"}
+    assert endpoint_labels["XLK"].showarrow is False
+    assert endpoint_labels["XLK"].yshift == 13
+    assert endpoint_labels["XLK"].font.size == 10
 
 
 def test_normalized_inspector_starts_at_100_and_respects_as_of():
@@ -157,10 +170,15 @@ def test_auto_fit_expands_with_values_and_keeps_center_at_100():
 
     assert sum(early.layout.xaxis.range) == 200
     assert sum(late.layout.xaxis.range) == 200
+    assert sum(early.layout.yaxis.range) == 200
+    assert sum(late.layout.yaxis.range) == 200
     assert late.layout.xaxis.range[1] > early.layout.xaxis.range[1]
+    assert late.layout.xaxis.range != late.layout.yaxis.range
+    assert late.layout.xaxis.range[1] <= 104.5
+    assert late.layout.yaxis.range[1] <= 103.5
 
 
-def test_crowded_endpoint_labels_are_spread_with_callout_lines():
+def test_crowded_endpoints_use_compact_labels_above_arrowheads():
     dates = pd.date_range("2024-01-05", periods=3, freq="W-FRI")
     frames = []
     endpoints = {
@@ -185,14 +203,40 @@ def test_crowded_endpoint_labels_are_spread_with_callout_lines():
     rotation = pd.concat(frames, ignore_index=True)
 
     figure, _ = build_rrg_figure(rotation, "SPY", dates[0], 3)
-    labels = {
-        annotation.text.replace("<b>", "").replace("</b>", ""): annotation
-        for annotation in figure.layout.annotations
-        if annotation.text in {f"<b>{ticker}</b>" for ticker in endpoints}
+    traces = {
+        trace.name: trace
+        for trace in figure.data
+        if trace.name in endpoints
     }
 
+    assert set(traces) == set(endpoints)
+    assert all(trace.mode == "lines+markers" for trace in traces.values())
+    assert all(trace.marker.size[-1] == 0 for trace in traces.values())
+    labels = {
+        annotation.text: annotation
+        for annotation in figure.layout.annotations
+        if annotation.text in endpoints
+    }
     assert set(labels) == set(endpoints)
-    assert labels["AAA"].ay != labels["BBB"].ay
-    assert labels["CCC"].ay != labels["DDD"].ay
-    assert all(label.showarrow for label in labels.values())
-    assert all(label.axref == "x" and label.ayref == "y" for label in labels.values())
+    assert all(label.showarrow is False for label in labels.values())
+    assert all(label.yshift == 13 for label in labels.values())
+    assert all(label.font.size == 10 for label in labels.values())
+
+
+def test_bloomberg_arrow_label_uses_short_symbol():
+    rotation = sample_rotation().loc[lambda frame: frame["ticker"] == "XLK"].copy()
+    rotation["ticker"] = "XLK US Equity"
+
+    figure, _ = build_rrg_figure(
+        rotation,
+        "SPY US Equity",
+        pd.Timestamp("2024-01-01"),
+        6,
+    )
+
+    labels = {
+        annotation.text
+        for annotation in figure.layout.annotations
+        if annotation.text in {"XLK", "SPY"}
+    }
+    assert labels == {"XLK", "SPY"}
