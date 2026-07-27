@@ -21,6 +21,28 @@ The first launch loads the 11 US sector ETFs against SPY. Choose a preset or ent
 comma-separated Yahoo Finance symbols, select a benchmark and observation frequency,
 then press **Update**. Matching requests are cached for 15 minutes.
 
+## Present in Jupyter
+
+The notebook edition uses the same data, calculations, charts, presets, and exports
+as the Streamlit app, presented with native `ipywidgets` and IPython output areas.
+
+```bash
+source .venv/bin/activate
+jupyter lab EquityRotation.ipynb
+```
+
+Run the notebook cells from top to bottom. The dashboard cell opens the interface and
+loads the default sector universe. Playback uses a native Play widget linked to the
+date slider, so the RRG and inspector advance together without rerunning a cell.
+
+To embed the dashboard in another notebook:
+
+```python
+from rrg.notebook import launch_notebook_dashboard
+
+dashboard = launch_notebook_dashboard(auto_load=True)
+```
+
 ## Workspace
 
 - Presets cover US sectors, US factors, global regions, and cross-asset rotation.
