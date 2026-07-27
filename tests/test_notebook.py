@@ -31,6 +31,25 @@ def test_notebook_controller_builds_widget_tree_without_loading():
     assert dashboard.benchmark.value == "SPY"
 
 
+def test_notebook_accepts_custom_price_loader():
+    calls = []
+
+    def bloomberg_loader(tickers, start, end):
+        calls.append((tickers, start, end))
+        return synthetic_daily_prices()
+
+    dashboard = NotebookDashboard(
+        auto_load=False,
+        price_loader=bloomberg_loader,
+        data_source_name="Bloomberg",
+    )
+    dashboard.refresh()
+
+    assert calls
+    assert dashboard.data_source_name == "Bloomberg"
+    assert "Bloomberg" in dashboard.view.children[-1].value
+
+
 def test_notebook_refresh_with_synthetic_data(monkeypatch):
     prices = synthetic_daily_prices()
     dashboard = NotebookDashboard(auto_load=False)

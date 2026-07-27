@@ -42,6 +42,19 @@ QUADRANT_ORDER = {
     "Lagging": 3,
 }
 
+BLOOMBERG_YELLOW_KEYS = {
+    "comdty": "Comdty",
+    "corp": "Corp",
+    "curncy": "Curncy",
+    "equity": "Equity",
+    "govt": "Govt",
+    "index": "Index",
+    "m-mkt": "M-Mkt",
+    "mtge": "Mtge",
+    "muni": "Muni",
+    "pfd": "Pfd",
+}
+
 
 @dataclass(frozen=True)
 class TickerSelection:
@@ -95,6 +108,47 @@ def _ticker_tokens(assets: str | Iterable[str]) -> list[str]:
     return list(assets)
 
 
+def normalize_ticker(ticker: str) -> str:
+    """Return a provider-safe canonical ticker.
+
+    Plain exchange symbols are uppercased. Bloomberg identifiers retain the
+    canonical capitalization of their terminal yellow key, for example
+    ``spy us EQUITY`` becomes ``SPY US Equity``.
+    """
+
+    collapsed = " ".join(str(ticker).strip().split())
+    if not collapsed:
+        return ""
+
+    head, separator, suffix = collapsed.rpartition(" ")
+    yellow_key = BLOOMBERG_YELLOW_KEYS.get(suffix.casefold())
+    if separator and head and yellow_key:
+        return f"{head.upper()} {yellow_key}"
+    return collapsed.upper()
+
+
+def normalize_price_columns(prices: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalize flat price columns without changing price observations.
+
+    This makes frames returned by different providers interoperable with the
+    analytics layer. Each input symbol must resolve to a distinct identifier.
+    """
+
+    if isinstance(prices.columns, pd.MultiIndex):
+        raise ValueError(
+            "Price columns must be flat. Select one Bloomberg field, such as "
+            "PX_LAST, before calculating rotation."
+        )
+
+    normalized = prices.copy()
+    normalized.columns = [normalize_ticker(str(column)) for column in prices.columns]
+    duplicates = normalized.columns[normalized.columns.duplicated()].unique().tolist()
+    if duplicates:
+        joined = ", ".join(str(value) for value in duplicates)
+        raise ValueError(f"Duplicate price columns after ticker normalization: {joined}.")
+    return normalized
+
+
 def normalize_tickers(
     assets: str | Iterable[str],
     benchmark: str,
@@ -103,7 +157,7 @@ def normalize_tickers(
 ) -> TickerSelection:
     """Normalize, deduplicate, validate, and cap user ticker input."""
 
-    normalized_benchmark = benchmark.strip().upper()
+    normalized_benchmark = normalize_ticker(benchmark)
     if not normalized_benchmark:
         raise ValueError("Enter a benchmark ticker.")
 
@@ -112,7 +166,7 @@ def normalize_tickers(
     seen: set[str] = set()
 
     for token in _ticker_tokens(assets):
-        ticker = token.strip().upper()
+        ticker = normalize_ticker(token)
         if not ticker or ticker in seen:
             continue
         seen.add(ticker)
@@ -165,7 +219,8 @@ def resample_prices(prices: pd.DataFrame, frequency: str) -> pd.DataFrame:
     if not isinstance(prices.index, pd.DatetimeIndex):
         raise TypeError("Prices must use a DatetimeIndex.")
 
-    clean = prices.sort_index().replace([np.inf, -np.inf], np.nan)
+    clean = normalize_price_columns(prices)
+    clean = clean.sort_index().replace([np.inf, -np.inf], np.nan)
     clean = clean.loc[~clean.index.duplicated(keep="last")]
 
     if frequency == "Daily":
@@ -207,7 +262,8 @@ def compute_rotation(
     RS-Momentum = 100 * RS-Ratio / EMA(RS-Ratio, momentum)
     """
 
-    benchmark = benchmark.upper()
+    prices = normalize_price_columns(prices)
+    benchmark = normalize_ticker(benchmark)
     if benchmark not in prices.columns or prices[benchmark].dropna().empty:
         raise ValueError(f"No usable price history was returned for {benchmark}.")
 
@@ -216,7 +272,7 @@ def compute_rotation(
     skipped: dict[str, str] = {}
 
     for raw_ticker in assets:
-        ticker = raw_ticker.upper()
+        ticker = normalize_ticker(raw_ticker)
         if ticker not in prices.columns:
             skipped[ticker] = "No price history returned."
             continue
@@ -390,8 +446,9 @@ def calculate_inspector_metrics(
 
     if frequency not in ANNUALIZATION_FACTORS:
         raise ValueError(f"Unsupported frequency: {frequency}")
-    ticker = ticker.upper()
-    benchmark = benchmark.upper()
+    prices = normalize_price_columns(prices)
+    ticker = normalize_ticker(ticker)
+    benchmark = normalize_ticker(benchmark)
     if ticker not in prices.columns or benchmark not in prices.columns:
         raise ValueError("Inspector prices are unavailable for the selected symbol.")
 

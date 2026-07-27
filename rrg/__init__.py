@@ -20,13 +20,15 @@ from .core import (
     classify_quadrant,
     compute_rotation,
     download_window,
+    normalize_price_columns,
+    normalize_ticker,
     normalize_tickers,
     playback_dates,
     period_start,
     resample_prices,
     summarize_snapshot,
 )
-from .data import download_adjusted_close
+from .data import download_adjusted_close, prepare_bloomberg_prices
 from .presets import ASSET_NAMES, PRESET_UNIVERSES, UniversePreset, asset_name
 
 __all__ = [
@@ -50,8 +52,11 @@ __all__ = [
     "compute_rotation",
     "download_adjusted_close",
     "download_window",
+    "normalize_price_columns",
+    "normalize_ticker",
     "normalize_tickers",
     "playback_dates",
+    "prepare_bloomberg_prices",
     "period_start",
     "period_axis_extent",
     "resample_prices",

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .core import normalize_ticker
+
 
 @dataclass(frozen=True)
 class UniversePreset:
@@ -89,5 +91,11 @@ ASSET_NAMES = {
 def asset_name(ticker: str) -> str:
     """Return a local display name, falling back to the normalized ticker."""
 
-    normalized = ticker.upper()
-    return ASSET_NAMES.get(normalized, normalized)
+    normalized = normalize_ticker(ticker)
+    direct = ASSET_NAMES.get(normalized)
+    if direct is not None:
+        return direct
+
+    # Bloomberg identifiers commonly add market and yellow-key components.
+    base_symbol = normalized.split(" ", 1)[0]
+    return ASSET_NAMES.get(base_symbol, normalized)

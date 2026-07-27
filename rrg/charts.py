@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from .core import normalize_price_columns, normalize_ticker
+
 
 ASSET_COLORS = (
     "#246BFE",
@@ -507,7 +509,8 @@ def build_inspector_figure(
 ) -> go.Figure:
     """Build benchmark context or a normalized focused-asset comparison."""
 
-    benchmark = benchmark.upper()
+    prices = normalize_price_columns(prices)
+    benchmark = normalize_ticker(benchmark)
     if focus_ticker is None:
         benchmark_series = prices[benchmark].loc[prices.index <= as_of]
         return build_benchmark_figure(
@@ -517,7 +520,7 @@ def build_inspector_figure(
             tail_start,
         )
 
-    focus_ticker = focus_ticker.upper()
+    focus_ticker = normalize_ticker(focus_ticker)
     aligned = prices[[focus_ticker, benchmark]].loc[
         (prices.index >= visible_start) & (prices.index <= as_of)
     ].dropna()

@@ -8,11 +8,52 @@ from rrg.core import (
     calculate_inspector_metrics,
     classify_quadrant,
     compute_rotation,
+    normalize_price_columns,
+    normalize_ticker,
     normalize_tickers,
     playback_dates,
     resample_prices,
     summarize_snapshot,
 )
+
+
+def test_bloomberg_tickers_keep_canonical_yellow_key_casing():
+    assert normalize_ticker(" spy   us   EQUITY ") == "SPY US Equity"
+    assert normalize_ticker("ndx index") == "NDX Index"
+    assert normalize_ticker("eurusd curncy") == "EURUSD Curncy"
+    assert normalize_ticker("brk-b") == "BRK-B"
+
+    selection = normalize_tickers(
+        "XLK US EQUITY, xlk us Equity, SPY US equity",
+        "spy us EQUITY",
+    )
+
+    assert selection.assets == ("XLK US Equity",)
+    assert selection.benchmark == "SPY US Equity"
+    assert any("benchmark" in warning for warning in selection.warnings)
+
+
+def test_price_columns_and_rotation_support_bloomberg_identifiers():
+    dates = pd.date_range("2020-01-03", periods=160, freq="W-FRI")
+    benchmark = np.linspace(100, 130, len(dates))
+    prices = pd.DataFrame(
+        {
+            "XLK US EQUITY": benchmark * np.linspace(1.0, 1.2, len(dates)),
+            "SPY US EQUITY": benchmark,
+        },
+        index=dates,
+    )
+
+    normalized = normalize_price_columns(prices)
+    result = compute_rotation(
+        normalized,
+        ["xlk us equity"],
+        "spy us EQUITY",
+    )
+
+    assert normalized.columns.tolist() == ["XLK US Equity", "SPY US Equity"]
+    assert set(result.points["ticker"]) == {"XLK US Equity"}
+    assert result.skipped == {}
 
 
 def test_normalize_tickers_deduplicates_excludes_benchmark_and_caps():

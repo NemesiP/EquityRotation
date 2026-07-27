@@ -43,6 +43,42 @@ from rrg.notebook import launch_notebook_dashboard
 dashboard = launch_notebook_dashboard(auto_load=True)
 ```
 
+### Bloomberg data
+
+The analytics preserve Bloomberg yellow-key casing. Inputs such as
+`SPY US EQUITY`, `spy us equity`, and `SPY US Equity` are all canonicalized to
+`SPY US Equity`. The notebook also accepts a custom price loader, so Bloomberg can
+be used without changing the dashboard or analytics:
+
+```python
+from xbbg import blp
+
+from rrg import prepare_bloomberg_prices
+from rrg.notebook import launch_notebook_dashboard
+
+def bloomberg_loader(tickers, start, end):
+    response = blp.bdh(
+        list(tickers),
+        flds="PX_LAST",
+        start_date=start,
+        end_date=end,
+    )
+    return prepare_bloomberg_prices(response, tickers, field="PX_LAST")
+
+dashboard = launch_notebook_dashboard(
+    auto_load=False,
+    price_loader=bloomberg_loader,
+    data_source_name="Bloomberg",
+)
+dashboard.assets.value = "XLK US Equity, XLF US Equity, XLE US Equity"
+dashboard.benchmark.value = "SPY US Equity"
+dashboard.refresh()
+```
+
+`xbbg` is optional and is not installed by this project because it requires a
+working Bloomberg Terminal/API environment. `prepare_bloomberg_prices` supports
+both xbbg-style wide MultiIndex responses and pdblp-style long responses.
+
 ## Workspace
 
 - Presets cover US sectors, US factors, global regions, and cross-asset rotation.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from html import escape
 from time import monotonic
@@ -61,11 +62,21 @@ NOTEBOOK_CSS = """
 </style>
 """
 
+PriceLoader = Callable[[Sequence[str], str, str], pd.DataFrame]
+
 
 class NotebookDashboard:
     """Stateful ipywidgets dashboard backed by the shared RRG modules."""
 
-    def __init__(self, *, auto_load: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        auto_load: bool = True,
+        price_loader: PriceLoader | None = None,
+        data_source_name: str = "Yahoo Finance",
+    ) -> None:
+        self.price_loader = price_loader or download_adjusted_close
+        self.data_source_name = data_source_name.strip() or "Market data provider"
         self.daily_prices: pd.DataFrame | None = None
         self.sampled_prices: pd.DataFrame | None = None
         self.rotation = pd.DataFrame()
@@ -297,8 +308,9 @@ class NotebookDashboard:
                 self.message_output,
                 widgets.HTML(
                     "<div class='rrg-nb-note' style='border-top:1px solid #dce2eb;"
-                    "margin-top:14px;padding-top:10px'>Source: Yahoo Finance via yfinance. "
-                    "For research and personal use; not investment advice.</div>"
+                    f"margin-top:14px;padding-top:10px'>Source: "
+                    f"{escape(self.data_source_name)}. "
+                    "For research use; not investment advice.</div>"
                 ),
             ],
             layout=widgets.Layout(width="100%"),
@@ -358,7 +370,7 @@ class NotebookDashboard:
 
     def _set_header(self, as_of: pd.Timestamp | None = None) -> None:
         status = (
-            "Yahoo Finance · adjusted close"
+            f"{self.data_source_name} · adjusted close"
             if as_of is None
             else f"Data through {as_of:%d %b %Y}"
         )
@@ -385,7 +397,9 @@ class NotebookDashboard:
         cached = self._cache.get(key)
         if cached and monotonic() - cached[0] < 900:
             return cached[1].copy()
-        prices = download_adjusted_close(tickers, start, end)
+        prices = self.price_loader(tickers, start, end)
+        if not isinstance(prices, pd.DataFrame):
+            raise TypeError("The price loader must return a pandas DataFrame.")
         self._cache[key] = (monotonic(), prices.copy())
         return prices
 
@@ -394,7 +408,10 @@ class NotebookDashboard:
 
         self.update_button.disabled = True
         self.update_button.description = "Loading…"
-        self.status.value = "<div class='rrg-nb-status'>Loading adjusted prices…</div>"
+        self.status.value = (
+            "<div class='rrg-nb-status'>Loading adjusted prices from "
+            f"{escape(self.data_source_name)}…</div>"
+        )
         with self.message_output:
             clear_output(wait=True)
         try:
@@ -699,8 +716,17 @@ class NotebookDashboard:
         return self
 
 
-def launch_notebook_dashboard(*, auto_load: bool = True) -> NotebookDashboard:
+def launch_notebook_dashboard(
+    *,
+    auto_load: bool = True,
+    price_loader: PriceLoader | None = None,
+    data_source_name: str = "Yahoo Finance",
+) -> NotebookDashboard:
     """Create and display the Jupyter dashboard."""
 
-    dashboard = NotebookDashboard(auto_load=auto_load)
+    dashboard = NotebookDashboard(
+        auto_load=auto_load,
+        price_loader=price_loader,
+        data_source_name=data_source_name,
+    )
     return dashboard.display()
